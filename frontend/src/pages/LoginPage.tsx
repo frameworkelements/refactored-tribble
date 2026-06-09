@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext";
-import { ApiError } from "../api";
+import { ApiError, api, SSO_LOGIN_URL } from "../api";
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -8,6 +8,19 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [ssoEnabled, setSsoEnabled] = useState(false);
+
+  useEffect(() => {
+    // Show the SSO button only if the backend has OIDC configured.
+    api
+      .ssoStatus()
+      .then((s) => setSsoEnabled(s.enabled))
+      .catch(() => setSsoEnabled(false));
+    // Surface an error bounced back from a failed SSO round-trip.
+    if (new URLSearchParams(window.location.search).has("sso_error")) {
+      setError("Single sign-on failed. Please try again or use your password.");
+    }
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -52,6 +65,24 @@ export function LoginPage() {
         <button type="submit" disabled={submitting} style={{ width: "100%" }}>
           {submitting ? "Signing in…" : "Sign in"}
         </button>
+
+        {ssoEnabled && (
+          <>
+            <div className="sso-divider">
+              <span>or</span>
+            </div>
+            <button
+              type="button"
+              className="secondary"
+              style={{ width: "100%" }}
+              onClick={() => {
+                window.location.href = SSO_LOGIN_URL;
+              }}
+            >
+              Sign in with SSO
+            </button>
+          </>
+        )}
       </form>
     </div>
   );

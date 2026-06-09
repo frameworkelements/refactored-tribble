@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod certifications;
+pub mod oidc;
 pub mod reports;
 pub mod trainings;
 pub mod users;
@@ -16,7 +17,10 @@ use crate::state::AppState;
 pub fn router(state: AppState) -> Router {
     let public = Router::new()
         .route("/health", get(health))
-        .route("/api/auth/login", post(auth::login));
+        .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/sso/status", get(oidc::status))
+        .route("/api/auth/sso/login", get(oidc::login))
+        .route("/api/auth/sso/callback", get(oidc::callback));
 
     let protected = Router::new()
         .route("/api/auth/logout", post(auth::logout))

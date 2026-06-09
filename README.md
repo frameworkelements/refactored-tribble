@@ -70,8 +70,9 @@ network. Postgres is reachable only by `app`.
 
 ## API
 
-All routes except `POST /api/auth/login` and `GET /health` require a valid
-session cookie.
+All routes require a valid session cookie except `GET /health`,
+`POST /api/auth/login`, and the public SSO routes under `/api/auth/sso/*`
+(see [Single sign-on](#single-sign-on-sso)).
 
 | Method | Path | Notes |
 | ------ | ---- | ----- |
@@ -111,6 +112,52 @@ session cookie.
   hardcoded. The seed admin is created on first run from `SEED_ADMIN_*`, so no
   credentials live in source or in `init.sql`.
 - **Network:** Postgres publishes no host port; only `app` can reach it.
+
+## Single sign-on (SSO)
+
+SSO is implemented with **OpenID Connect** — the OAuth 2.0 Authorization Code
+flow with **PKCE** (`S256`), `state`, and `nonce`. It works with any
+OIDC-compliant identity provider (Google, Microsoft Entra ID, Okta, Auth0,
+Keycloak, …) discovered automatically from its issuer URL. SSO sits alongside
+password login; it simply becomes another way to mint the same server-side
+session.
+
+**Enable it** by setting these in `.env` (leave blank to keep password-only):
+
+```
+OIDC_ISSUER_URL=https://accounts.google.com
+OIDC_CLIENT_ID=...
+OIDC_CLIENT_SECRET=...
+OIDC_REDIRECT_URL=https://your-host/api/auth/sso/callback
+OIDC_DEFAULT_ROLE=learner            # role for JIT-provisioned users
+OIDC_ALLOWED_EMAIL_DOMAIN=example.com # optional: restrict to one domain
+```
+
+Register `OIDC_REDIRECT_URL` as an allowed redirect URI with your provider.
+The frontend shows a "Sign in with SSO" button only when the backend reports
+SSO is configured (`GET /api/auth/sso/status`).
+
+**Flow & endpoints (all public):**
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| GET | `/api/auth/sso/status` | whether SSO is enabled |
+| GET | `/api/auth/sso/login` | redirect the browser to the IdP (PKCE/state/nonce) |
+| GET | `/api/auth/sso/callback` | exchange code, verify ID token, sign in |
+
+**Security properties:**
+
+- ID tokens are fully verified (JWKS signature, `iss`, `aud`, `exp`, `nonce`).
+- PKCE verifier + nonce are stored **server-side**, keyed by `state`, used once,
+  and expire after 10 minutes (CSRF/replay protection).
+- Only **verified** emails (`email_verified=true`) are accepted; an optional
+  domain allowlist further restricts who may sign in.
+- The discovery/token HTTP client disables redirect-following to mitigate SSRF.
+- Users are matched by stable `(issuer, subject)`, then linked by email, then
+  just-in-time provisioned with `OIDC_DEFAULT_ROLE`. SSO-only accounts have no
+  password hash and cannot be password-logged-in.
+- SSO discovery failure at startup is non-fatal: the app still serves password
+  login with SSO disabled.
 
 ## Data protection (GDPR)
 

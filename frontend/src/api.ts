@@ -46,12 +46,17 @@ async function request<T>(
   return data as T;
 }
 
+/// URL the browser navigates to in order to begin the SSO flow.
+export const SSO_LOGIN_URL = "/api/auth/sso/login";
+
 export const api = {
   // auth
   login: (email: string, password: string) =>
     request<UserProfile>("POST", "/api/auth/login", { email, password }),
   logout: () => request<void>("POST", "/api/auth/logout"),
   me: () => request<UserProfile>("GET", "/api/me"),
+  ssoStatus: () =>
+    request<{ enabled: boolean }>("GET", "/api/auth/sso/status"),
 
   // trainings
   listTrainings: () => request<Training[]>("GET", "/api/trainings"),

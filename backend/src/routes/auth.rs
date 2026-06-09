@@ -34,7 +34,7 @@ pub async fn login(
 
     // Always run a hash verification to keep timing roughly constant whether or
     // not the account exists, mitigating user-enumeration via response timing.
-    let user = sqlx::query_as::<_, (uuid::Uuid, String, String, Role)>(
+    let user = sqlx::query_as::<_, (uuid::Uuid, String, Option<String>, Role)>(
         "SELECT id, email, password_hash, role FROM users WHERE email = $1",
     )
     .bind(&email)
@@ -42,9 +42,11 @@ pub async fn login(
     .await?;
 
     let authenticated = match &user {
-        Some((_, _, hash, _)) => verify_password(&body.password, hash),
-        None => {
-            // Dummy verification against a freshly generated hash.
+        // Account exists and has a password set.
+        Some((_, _, Some(hash), _)) => verify_password(&body.password, hash),
+        // Either no such account, or an SSO-only account with no password.
+        // Run a dummy verification to keep timing roughly constant.
+        _ => {
             let dummy = hash_password("invalid-placeholder-password")?;
             let _ = verify_password(&body.password, &dummy);
             false
@@ -97,7 +99,7 @@ pub async fn me(State(state): State<AppState>, user: AuthUser) -> AppResult<Json
     Ok(Json(profile))
 }
 
-fn build_session_cookie(token: String, secure: bool, max_age_secs: i64) -> Cookie<'static> {
+pub(crate) fn build_session_cookie(token: String, secure: bool, max_age_secs: i64) -> Cookie<'static> {
     let mut cookie = Cookie::new(SESSION_COOKIE, token);
     cookie.set_http_only(true);
     cookie.set_secure(secure);

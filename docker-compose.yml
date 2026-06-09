@@ -35,6 +35,14 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+      # Optional OpenID Connect SSO (blank = disabled).
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URL: ${OIDC_REDIRECT_URL:-}
+      OIDC_DEFAULT_ROLE: ${OIDC_DEFAULT_ROLE:-learner}
+      OIDC_ALLOWED_EMAIL_DOMAIN: ${OIDC_ALLOWED_EMAIL_DOMAIN:-}
+      POST_LOGIN_REDIRECT: ${POST_LOGIN_REDIRECT:-/}
       RUST_LOG: ${RUST_LOG:-lms_backend=info,tower_http=info,sqlx=warn}
       BIND_ADDR: 0.0.0.0:8080
     # No host port published; the frontend proxies to it over the internal

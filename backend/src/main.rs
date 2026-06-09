@@ -35,7 +35,23 @@ async fn run() -> Result<(), String> {
 
     let pool = connect_with_retry(&config.database_url).await?;
 
-    let state = AppState::new(pool, config.clone());
+    // Optionally bring up SSO. Discovery failure is non-fatal: the app still
+    // starts with password login, SSO simply stays disabled.
+    let oidc = match config.oidc.clone() {
+        Some(settings) => match routes::oidc::OidcState::init(settings).await {
+            Ok(state) => {
+                tracing::info!("OIDC SSO enabled");
+                Some(std::sync::Arc::new(state))
+            }
+            Err(e) => {
+                tracing::warn!("OIDC SSO disabled: {e}");
+                None
+            }
+        },
+        None => None,
+    };
+
+    let state = AppState::new(pool, config.clone(), oidc);
 
     // Bootstrap the seed admin (idempotent).
     auth::ensure_seed_admin(&state)
@@ -99,6 +115,13 @@ fn spawn_session_cleanup(state: AppState) {
                 }
                 Ok(_) => {}
                 Err(e) => tracing::warn!("session cleanup failed: {e}"),
+            }
+            // Also drop abandoned/expired in-flight SSO login attempts.
+            if let Err(e) = sqlx::query("DELETE FROM oidc_auth_requests WHERE expires_at <= now()")
+                .execute(&state.db)
+                .await
+            {
+                tracing::warn!("oidc request cleanup failed: {e}");
             }
         }
     });
