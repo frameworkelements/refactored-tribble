@@ -33,6 +33,14 @@ chrono = { version = "0.4", features = ["serde"] }
 argon2 = "0.5"
 rand = "0.8"
 time = "0.3"
+
+# OpenID Connect (SSO). Uses reqwest under the hood; we pin reqwest's TLS
+# feature to bundle Mozilla's webpki root certificates so provider discovery
+# works without depending on a system CA store.
+openidconnect = "4.0.1"
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls-native-roots",
+] }
 sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"

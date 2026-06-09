@@ -1,5 +1,23 @@
 use std::time::Duration;
 
+use crate::models::Role;
+
+/// Optional OpenID Connect (SSO) settings. Present only when all four required
+/// variables are configured.
+#[derive(Clone, Debug)]
+pub struct OidcSettings {
+    pub issuer_url: String,
+    pub client_id: String,
+    pub client_secret: String,
+    pub redirect_url: String,
+    /// Role granted to users provisioned just-in-time on first SSO login.
+    pub default_role: Role,
+    /// When set, only emails in this domain may sign in via SSO.
+    pub allowed_email_domain: Option<String>,
+    /// Where the browser is sent after a successful SSO login.
+    pub post_login_redirect: String,
+}
+
 /// Runtime configuration, sourced entirely from environment variables.
 /// No secret has a default — the process refuses to start without them.
 #[derive(Clone, Debug)]
@@ -12,6 +30,7 @@ pub struct Config {
     pub cookie_secure: bool,
     pub seed_admin_email: Option<String>,
     pub seed_admin_password: Option<String>,
+    pub oidc: Option<OidcSettings>,
 }
 
 impl Config {
@@ -43,7 +62,46 @@ impl Config {
             cookie_secure,
             seed_admin_email: non_empty("SEED_ADMIN_EMAIL"),
             seed_admin_password: non_empty("SEED_ADMIN_PASSWORD"),
+            oidc: oidc_from_env()?,
         })
+    }
+}
+
+/// Build OIDC settings if (and only if) all required variables are present.
+fn oidc_from_env() -> Result<Option<OidcSettings>, String> {
+    let issuer_url = non_empty("OIDC_ISSUER_URL");
+    let client_id = non_empty("OIDC_CLIENT_ID");
+    let client_secret = non_empty("OIDC_CLIENT_SECRET");
+    let redirect_url = non_empty("OIDC_REDIRECT_URL");
+
+    match (issuer_url, client_id, client_secret, redirect_url) {
+        (Some(issuer_url), Some(client_id), Some(client_secret), Some(redirect_url)) => {
+            let default_role = match non_empty("OIDC_DEFAULT_ROLE").as_deref() {
+                None | Some("learner") => Role::Learner,
+                Some("manager") => Role::Manager,
+                Some("admin") => Role::Admin,
+                Some(other) => {
+                    return Err(format!("invalid OIDC_DEFAULT_ROLE: {other}"));
+                }
+            };
+            Ok(Some(OidcSettings {
+                issuer_url,
+                client_id,
+                client_secret,
+                redirect_url,
+                default_role,
+                allowed_email_domain: non_empty("OIDC_ALLOWED_EMAIL_DOMAIN")
+                    .map(|d| d.trim().trim_start_matches('@').to_lowercase()),
+                post_login_redirect: non_empty("POST_LOGIN_REDIRECT")
+                    .unwrap_or_else(|| "/".to_string()),
+            }))
+        }
+        (None, None, None, None) => Ok(None),
+        _ => Err(
+            "incomplete OIDC configuration: set all of OIDC_ISSUER_URL, OIDC_CLIENT_ID, \
+             OIDC_CLIENT_SECRET, OIDC_REDIRECT_URL or none of them"
+                .into(),
+        ),
     }
 }
 

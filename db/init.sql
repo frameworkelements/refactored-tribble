@@ -39,11 +39,20 @@ $$ LANGUAGE plpgsql;
 CREATE TABLE IF NOT EXISTS users (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email         TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
+    -- Nullable: SSO-provisioned accounts have no local password.
+    password_hash TEXT,
     role          user_role NOT NULL DEFAULT 'learner',
+    -- Stable external identity for SSO (issuer + subject claim).
+    oidc_issuer   TEXT,
+    oidc_subject  TEXT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- One local identity per (issuer, subject) pair.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_oidc
+    ON users (oidc_issuer, oidc_subject)
+    WHERE oidc_issuer IS NOT NULL AND oidc_subject IS NOT NULL;
 
 CREATE TRIGGER trg_users_updated_at
     BEFORE UPDATE ON users
@@ -127,6 +136,20 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at TIMESTAMPTZ NOT NULL
 );
 
+-- ---------------------------------------------------------------------------
+-- oidc_auth_requests — short-lived, one-time store for in-flight SSO logins.
+-- Holds the PKCE verifier and nonce keyed by the CSRF state value. Rows are
+-- consumed (deleted) on callback and ignored once expired.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS oidc_auth_requests (
+    state         TEXT PRIMARY KEY,
+    pkce_verifier TEXT NOT NULL,
+    nonce         TEXT NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at    TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_oidc_requests_expires ON oidc_auth_requests(expires_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_completions_user ON user_training_completions(user_id);
