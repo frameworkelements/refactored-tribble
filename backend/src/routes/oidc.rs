@@ -9,7 +9,7 @@
 use axum::extract::{Query, State};
 use axum::response::Redirect;
 use axum::Json;
-use axum_extra::extract::cookie::CookieJar;
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use chrono::{Duration, Utc};
 use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata};
 use openidconnect::{
@@ -62,6 +62,33 @@ fn internal<E: std::fmt::Display>(e: E) -> AppError {
     AppError::Internal(InternalError::msg(e.to_string()))
 }
 
+/// Cookie that binds an in-flight SSO login to the browser that started it.
+/// The CSRF `state` is echoed back here so the callback can require that the
+/// same browser completes the flow (defends against login CSRF / forced
+/// sign-in). Scoped to the SSO routes and short-lived to match the auth-request
+/// expiry.
+const OIDC_STATE_COOKIE: &str = "lms_oidc_state";
+
+/// Build the per-attempt state cookie. `SameSite=Lax` (not `Strict`) is
+/// required: the callback is reached via a top-level cross-site redirect from
+/// the IdP, on which a `Strict` cookie would not be sent.
+fn build_state_cookie(state_value: String, secure: bool) -> Cookie<'static> {
+    let mut cookie = Cookie::new(OIDC_STATE_COOKIE, state_value);
+    cookie.set_http_only(true);
+    cookie.set_secure(secure);
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_path("/api/auth/sso");
+    cookie.set_max_age(time::Duration::minutes(10));
+    cookie
+}
+
+/// Expire the state cookie once the flow has completed (or errored).
+fn clear_state_cookie(jar: CookieJar) -> CookieJar {
+    let mut removal = Cookie::new(OIDC_STATE_COOKIE, "");
+    removal.set_path("/api/auth/sso");
+    jar.remove(removal)
+}
+
 /// GET /api/auth/sso/status — public; tells the frontend whether to show the
 /// SSO button.
 pub async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -69,7 +96,10 @@ pub async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
 }
 
 /// GET /api/auth/sso/login — begin the flow: redirect the browser to the IdP.
-pub async fn login(State(state): State<AppState>) -> AppResult<Redirect> {
+pub async fn login(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> AppResult<(CookieJar, Redirect)> {
     let oidc = state.oidc.as_ref().ok_or(AppError::NotFound)?;
 
     let client = CoreClient::from_provider_metadata(
@@ -107,7 +137,11 @@ pub async fn login(State(state): State<AppState>) -> AppResult<Redirect> {
     .execute(&state.db)
     .await?;
 
-    Ok(Redirect::to(auth_url.as_str()))
+    // Bind this attempt to the initiating browser: the callback will require
+    // that the same `state` is presented in this cookie.
+    let state_cookie = build_state_cookie(csrf_token.secret().clone(), state.config.cookie_secure);
+
+    Ok((jar.add(state_cookie), Redirect::to(auth_url.as_str())))
 }
 
 #[derive(Debug, Deserialize)]
@@ -128,7 +162,7 @@ pub async fn callback(
     // The user denied consent or the IdP returned an error.
     if let Some(err) = params.error {
         tracing::warn!("SSO provider returned error: {err}");
-        return Ok((jar, Redirect::to("/login?sso_error=1")));
+        return Ok((clear_state_cookie(jar), Redirect::to("/login?sso_error=1")));
     }
 
     let code = params
@@ -137,6 +171,21 @@ pub async fn callback(
     let csrf_state = params
         .state
         .ok_or_else(|| AppError::bad_request("missing state"))?;
+
+    // Bind the flow to the browser that began it: the `state` echoed in the
+    // login-time cookie must match the `state` returned by the IdP. Without
+    // this, any browser presenting a valid `state` could complete the flow,
+    // allowing login CSRF (forcing a victim into an attacker-controlled
+    // session). Checked before consuming the one-time row so a mismatched
+    // request cannot burn the initiator's pending login.
+    let cookie_state = jar
+        .get(OIDC_STATE_COOKIE)
+        .map(|c| c.value().to_string())
+        .ok_or_else(|| AppError::bad_request("missing SSO state cookie"))?;
+    if cookie_state != csrf_state {
+        return Err(AppError::bad_request("SSO state mismatch"));
+    }
+    let jar = clear_state_cookie(jar);
 
     // Atomically consume the stored auth request (one-time use, CSRF defence).
     let row = sqlx::query_as::<_, (String, String, chrono::DateTime<Utc>)>(
