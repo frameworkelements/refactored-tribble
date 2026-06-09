@@ -3,6 +3,7 @@ import type {
   CertificationStatus,
   ComplianceEntry,
   Dashboard,
+  Role,
   Training,
   UserProfile,
 } from "./types";
@@ -99,6 +100,9 @@ export const api = {
 
   // users & reports
   listUsers: () => request<UserProfile[]>("GET", "/api/users"),
+  createUser: (input: { email: string; password: string; role: Role }) =>
+    request<UserProfile>("POST", "/api/users", input),
+  deleteUser: (id: string) => request<void>("DELETE", `/api/users/${id}`),
   dashboard: (id: string) =>
     request<Dashboard>("GET", `/api/users/${id}/dashboard`),
   compliance: () => request<ComplianceEntry[]>("GET", "/api/reports/compliance"),

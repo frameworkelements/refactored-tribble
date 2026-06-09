@@ -112,6 +112,34 @@ session cookie.
   credentials live in source or in `init.sql`.
 - **Network:** Postgres publishes no host port; only `app` can reach it.
 
+## Data protection (GDPR)
+
+The system is designed to support the core data-subject rights and the
+security/storage-limitation principles of the GDPR:
+
+- **Data minimisation:** only an email, role, and Argon2id password hash are
+  stored per user. Emails are not written to application logs.
+- **Right of access (Art. 15):** `GET /api/users/:id/dashboard` returns the
+  subject's full record — profile, training completions, and certification
+  status. Users can read their own; admins/managers can read any.
+- **Right to erasure (Art. 17):** `DELETE /api/users/:id` (admin) removes the
+  account and cascades to the user's sessions, training completions, and
+  certification records. Authored trainings are retained as organisational
+  content but their `created_by` link is nulled (`ON DELETE SET NULL`), so no
+  personal identifier remains. Deleting yourself or the last admin is blocked
+  to prevent lockout.
+- **Security of processing (Art. 32):** passwords hashed with Argon2id; session
+  tokens are 256-bit random values stored only as a keyed HMAC-SHA256 digest;
+  cookies are `HttpOnly` / `Secure` / `SameSite=Strict`; login is rate-limited
+  per account against brute force; all traffic to the database stays on the
+  internal Docker network.
+- **Storage limitation:** expired sessions are purged hourly by a background
+  task rather than retained indefinitely.
+
+For a production deployment you should additionally serve everything over TLS,
+define a documented retention policy for completion/certification history, and
+present a privacy notice / capture lawful basis at the application level.
+
 ## Local development (without Docker)
 
 Backend:

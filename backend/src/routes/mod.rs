@@ -49,7 +49,8 @@ pub fn router(state: AppState) -> Router {
             "/api/certifications/{id}/assign",
             post(certifications::assign),
         )
-        .route("/api/users", get(users::list))
+        .route("/api/users", get(users::list).post(users::create))
+        .route("/api/users/{id}", axum::routing::delete(users::delete))
         .route("/api/users/{id}/dashboard", get(users::dashboard))
         .route("/api/reports/compliance", get(reports::compliance))
         .route_layer(middleware::from_fn_with_state(

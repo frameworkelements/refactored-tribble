@@ -6,10 +6,7 @@ use std::time::Duration;
 pub struct Config {
     pub database_url: String,
     pub bind_addr: String,
-    /// Required to be present (and non-trivial) so deployments cannot
-    /// accidentally run without an operator-set secret. Retained on the struct
-    /// for future signing use.
-    #[allow(dead_code)]
+    /// Key used to derive the HMAC of session tokens stored server-side.
     pub session_secret: String,
     pub session_ttl: Duration,
     pub cookie_secure: bool,

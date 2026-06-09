@@ -1,16 +1,27 @@
 use axum::extract::{Path, State};
+use axum::http::StatusCode;
 use axum::Json;
 use chrono::{NaiveDate, Utc};
+use serde::Deserialize;
 use sqlx::FromRow;
 use uuid::Uuid;
 
-use crate::auth::AuthUser;
+use crate::auth::{hash_password, AuthUser};
 use crate::error::{AppError, AppResult};
-use crate::models::{CertificationStatus, CompletionRecord, Dashboard, UserProfile};
+use crate::models::{CertificationStatus, CompletionRecord, Dashboard, Role, UserProfile};
 use crate::state::AppState;
+use crate::validation::{validate_email, validate_password};
 
 /// Number of days before expiry at which a certification is flagged.
 pub const EXPIRY_WARNING_DAYS: i64 = 30;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateUserInput {
+    pub email: String,
+    pub password: String,
+    pub role: Role,
+}
 
 /// GET /api/users — admin/manager only (used by the admin panel).
 pub async fn list(
@@ -24,6 +35,76 @@ pub async fn list(
     .fetch_all(&state.db)
     .await?;
     Ok(Json(rows))
+}
+
+/// POST /api/users — admin only. Creates a managed account.
+pub async fn create(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Json(body): Json<CreateUserInput>,
+) -> AppResult<(StatusCode, Json<UserProfile>)> {
+    user.require_admin()?;
+    let email = validate_email(&body.email)?;
+    validate_password(&body.password)?;
+    let hash = hash_password(&body.password)?;
+
+    let result = sqlx::query_as::<_, UserProfile>(
+        "INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) \
+         RETURNING id, email, role, created_at",
+    )
+    .bind(&email)
+    .bind(&hash)
+    .bind(body.role)
+    .fetch_one(&state.db)
+    .await;
+
+    match result {
+        Ok(profile) => Ok((StatusCode::CREATED, Json(profile))),
+        Err(sqlx::Error::Database(db)) if db.is_unique_violation() => {
+            Err(AppError::conflict("a user with that email already exists"))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// DELETE /api/users/:id — admin only. Right to erasure (GDPR Art. 17):
+/// removes the account and cascades to the user's sessions, training
+/// completions and certification records; authored trainings are retained but
+/// their `created_by` link is nulled.
+pub async fn delete(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<StatusCode> {
+    user.require_admin()?;
+
+    // Guard against an admin locking everyone out by deleting their own
+    // account or removing the final admin.
+    if id == user.id {
+        return Err(AppError::bad_request(
+            "you cannot delete your own account",
+        ));
+    }
+    let target_role: Option<(Role,)> = sqlx::query_as("SELECT role FROM users WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.db)
+        .await?;
+    let target_role = target_role.ok_or(AppError::NotFound)?.0;
+    if target_role.is_admin() {
+        let admin_count: (i64,) =
+            sqlx::query_as("SELECT count(*) FROM users WHERE role = 'admin'")
+                .fetch_one(&state.db)
+                .await?;
+        if admin_count.0 <= 1 {
+            return Err(AppError::bad_request("cannot delete the last admin"));
+        }
+    }
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// GET /api/users/:id/dashboard

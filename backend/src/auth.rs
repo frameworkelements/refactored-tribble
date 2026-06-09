@@ -6,8 +6,9 @@ use axum::middleware::Next;
 use axum::response::Response;
 use axum_extra::extract::cookie::CookieJar;
 use chrono::{DateTime, Utc};
+use hmac::{Hmac, Mac};
 use rand::RngCore;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::error::{anyhow_lite::Error as InternalError, AppError, AppResult};
@@ -59,17 +60,22 @@ pub fn verify_password(password: &str, stored_hash: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Generate a 256-bit random session token, returned as hex. The raw token is
-/// handed to the client; only its SHA-256 hash is persisted server-side.
+/// handed to the client; only a keyed hash of it is persisted server-side.
 pub fn generate_token() -> String {
     let mut bytes = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
 
-pub fn hash_token(token: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(token.as_bytes());
-    hex::encode(hasher.finalize())
+/// Keyed (HMAC-SHA256) hash of a session token using the server's
+/// `SESSION_SECRET`. Storing a *keyed* digest means that a leak of the
+/// `sessions` table alone is not enough to look up or forge a session — an
+/// attacker would also need the server secret.
+fn hash_token(secret: &str, token: &str) -> String {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
+        .expect("HMAC accepts keys of any length");
+    mac.update(token.as_bytes());
+    hex::encode(mac.finalize().into_bytes())
 }
 
 /// Persist a new session and return the raw token.
@@ -78,7 +84,7 @@ pub async fn create_session(
     user_id: Uuid,
 ) -> AppResult<(String, DateTime<Utc>)> {
     let token = generate_token();
-    let token_hash = hash_token(&token);
+    let token_hash = hash_token(&state.config.session_secret, &token);
     let expires_at = Utc::now()
         + chrono::Duration::from_std(state.config.session_ttl)
             .map_err(|e| AppError::Internal(InternalError::msg(e.to_string())))?;
@@ -94,7 +100,7 @@ pub async fn create_session(
 }
 
 pub async fn destroy_session(state: &AppState, token: &str) -> AppResult<()> {
-    let token_hash = hash_token(token);
+    let token_hash = hash_token(&state.config.session_secret, token);
     sqlx::query("DELETE FROM sessions WHERE token_hash = $1")
         .bind(&token_hash)
         .execute(&state.db)
@@ -105,7 +111,7 @@ pub async fn destroy_session(state: &AppState, token: &str) -> AppResult<()> {
 /// Look up the user for a raw token, enforcing expiry. Returns None when the
 /// token is unknown or expired.
 async fn user_for_token(state: &AppState, token: &str) -> AppResult<Option<AuthUser>> {
-    let token_hash = hash_token(token);
+    let token_hash = hash_token(&state.config.session_secret, token);
     let row = sqlx::query_as::<_, (Uuid, String, Role)>(
         r#"
         SELECT u.id, u.email, u.role
@@ -205,7 +211,8 @@ pub async fn ensure_seed_admin(state: &AppState) -> AppResult<()> {
         .await?;
 
     if exists.is_some() {
-        tracing::info!(%email, "seed admin already present");
+        // Avoid logging the email (PII / data minimisation).
+        tracing::info!("seed admin already present; skipping bootstrap");
         return Ok(());
     }
 
@@ -216,6 +223,6 @@ pub async fn ensure_seed_admin(state: &AppState) -> AppResult<()> {
         .execute(&state.db)
         .await?;
 
-    tracing::info!(%email, "seed admin created");
+    tracing::info!("seed admin created");
     Ok(())
 }

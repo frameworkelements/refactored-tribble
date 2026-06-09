@@ -36,7 +36,7 @@ pub struct Training {
     pub title: String,
     pub description: String,
     pub duration_minutes: i32,
-    pub created_by: Uuid,
+    pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
