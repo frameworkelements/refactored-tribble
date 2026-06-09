@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod error;
 mod models;
+mod ratelimit;
 mod routes;
 mod state;
 mod validation;
@@ -41,6 +42,9 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|_| "failed to bootstrap seed admin".to_string())?;
 
+    // Periodically purge expired sessions (storage limitation / GDPR).
+    spawn_session_cleanup(state.clone());
+
     let app = routes::router(state).layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(&config.bind_addr)
@@ -77,6 +81,27 @@ async fn connect_with_retry(database_url: &str) -> Result<sqlx::PgPool, String> 
             Err(e) => return Err(format!("could not connect to database: {e}")),
         }
     }
+}
+
+/// Background task that deletes expired session rows so the session store does
+/// not retain stale data indefinitely.
+fn spawn_session_cleanup(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(3600));
+        loop {
+            interval.tick().await;
+            match sqlx::query("DELETE FROM sessions WHERE expires_at <= now()")
+                .execute(&state.db)
+                .await
+            {
+                Ok(res) if res.rows_affected() > 0 => {
+                    tracing::info!("purged {} expired session(s)", res.rows_affected());
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("session cleanup failed: {e}"),
+            }
+        }
+    });
 }
 
 async fn shutdown_signal() {

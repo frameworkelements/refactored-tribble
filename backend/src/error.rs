@@ -19,6 +19,12 @@ pub enum AppError {
     #[error("{0}")]
     BadRequest(String),
 
+    #[error("{0}")]
+    Conflict(String),
+
+    #[error("too many attempts; please try again later")]
+    TooManyRequests,
+
     #[error("internal server error")]
     Internal(#[from] anyhow_lite::Error),
 }
@@ -26,6 +32,9 @@ pub enum AppError {
 impl AppError {
     pub fn bad_request(msg: impl Into<String>) -> Self {
         AppError::BadRequest(msg.into())
+    }
+    pub fn conflict(msg: impl Into<String>) -> Self {
+        AppError::Conflict(msg.into())
     }
 }
 
@@ -36,6 +45,8 @@ impl IntoResponse for AppError {
             AppError::Forbidden => (StatusCode::FORBIDDEN, self.to_string()),
             AppError::NotFound => (StatusCode::NOT_FOUND, self.to_string()),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            AppError::Conflict(_) => (StatusCode::CONFLICT, self.to_string()),
+            AppError::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
             AppError::Internal(e) => {
                 tracing::error!(error = %e, "internal error");
                 (

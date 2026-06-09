@@ -27,6 +27,11 @@ pub async fn login(
     let email = validate_email(&body.email)?;
     validate_password(&body.password)?;
 
+    // Throttle repeated failures per account to slow credential brute-forcing.
+    if !state.login_limiter.check(&email) {
+        return Err(AppError::TooManyRequests);
+    }
+
     // Always run a hash verification to keep timing roughly constant whether or
     // not the account exists, mitigating user-enumeration via response timing.
     let user = sqlx::query_as::<_, (uuid::Uuid, String, String, Role)>(
@@ -47,8 +52,10 @@ pub async fn login(
     };
 
     if !authenticated {
+        state.login_limiter.record_failure(&email);
         return Err(AppError::Unauthorized);
     }
+    state.login_limiter.reset(&email);
 
     let (id, email, _, role) = user.expect("authenticated implies user exists");
     let (token, expires_at) = create_session(&state, id).await?;

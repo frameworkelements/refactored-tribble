@@ -1,14 +1,22 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../api";
+import { useAuth } from "../auth/AuthContext";
 import { StatusBadge } from "../components/StatusBadge";
-import type { Certification, ComplianceEntry, UserProfile } from "../types";
+import type { Certification, ComplianceEntry, Role, UserProfile } from "../types";
 
 export function AdminPage() {
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [certs, setCerts] = useState<Certification[]>([]);
   const [report, setReport] = useState<ComplianceEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  // create-user form
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState<Role>("learner");
+  const [creating, setCreating] = useState(false);
 
   // assign form
   const [userId, setUserId] = useState("");
@@ -29,6 +37,48 @@ export function AdminPage() {
   }
 
   useEffect(load, []);
+
+  async function onCreateUser(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setMessage(null);
+    setCreating(true);
+    try {
+      await api.createUser({
+        email: newEmail,
+        password: newPassword,
+        role: newRole,
+      });
+      setMessage("User created.");
+      setNewEmail("");
+      setNewPassword("");
+      setNewRole("learner");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create user");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function onDeleteUser(id: string, email: string) {
+    setError(null);
+    setMessage(null);
+    if (
+      !confirm(
+        `Permanently delete ${email}? This erases their account, sessions, completions and certification records.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await api.deleteUser(id);
+      setMessage("User erased.");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete user");
+    }
+  }
 
   async function onAssign(e: FormEvent) {
     e.preventDefault();
@@ -120,6 +170,49 @@ export function AdminPage() {
       </div>
 
       <div className="card">
+        <h3>Create user</h3>
+        <form onSubmit={onCreateUser}>
+          <div className="row">
+            <div style={{ flex: 2 }}>
+              <label>Email</label>
+              <input
+                type="email"
+                value={newEmail}
+                maxLength={254}
+                onChange={(e) => setNewEmail(e.target.value)}
+                required
+              />
+            </div>
+            <div style={{ flex: 2 }}>
+              <label>Password</label>
+              <input
+                type="password"
+                value={newPassword}
+                minLength={8}
+                maxLength={256}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label>Role</label>
+              <select
+                value={newRole}
+                onChange={(e) => setNewRole(e.target.value as Role)}
+              >
+                <option value="learner">learner</option>
+                <option value="manager">manager</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+          </div>
+          <button type="submit" disabled={creating}>
+            {creating ? "Creating…" : "Create user"}
+          </button>
+        </form>
+      </div>
+
+      <div className="card">
         <h3>Users</h3>
         <table>
           <thead>
@@ -127,6 +220,7 @@ export function AdminPage() {
               <th>Email</th>
               <th>Role</th>
               <th>Created</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -135,6 +229,16 @@ export function AdminPage() {
                 <td>{u.email}</td>
                 <td>{u.role}</td>
                 <td>{new Date(u.created_at).toLocaleDateString()}</td>
+                <td>
+                  {u.id !== currentUser?.id && (
+                    <button
+                      className="danger"
+                      onClick={() => void onDeleteUser(u.id, u.email)}
+                    >
+                      Erase
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

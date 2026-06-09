@@ -57,7 +57,10 @@ CREATE TABLE IF NOT EXISTS trainings (
     title            TEXT NOT NULL,
     description      TEXT NOT NULL DEFAULT '',
     duration_minutes INTEGER NOT NULL CHECK (duration_minutes >= 0),
-    created_by       UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    -- Nullable + ON DELETE SET NULL so a user can be erased (GDPR Art. 17)
+    -- without destroying the organisational training content they authored;
+    -- the personal link is severed instead.
+    created_by       UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
