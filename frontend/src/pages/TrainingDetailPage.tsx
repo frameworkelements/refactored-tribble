@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth/AuthContext";
-import type { Training } from "../types";
+import { formatDay, formatTimeRange } from "../format";
+import type { Training, TrainingSession } from "../types";
 
 export function TrainingDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -11,10 +12,19 @@ export function TrainingDetailPage() {
   const canManage = user?.role === "admin" || user?.role === "manager";
 
   const [training, setTraining] = useState<Training | null>(null);
+  const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [score, setScore] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  function loadSessions(trainingId: string) {
+    api
+      .listSessions({ trainingId, upcoming: true })
+      .then(setSessions)
+      .catch(() => undefined);
+  }
 
   useEffect(() => {
     if (!id) return;
@@ -22,7 +32,22 @@ export function TrainingDetailPage() {
       .getTraining(id)
       .then(setTraining)
       .catch((e) => setError(e instanceof Error ? e.message : "Not found"));
+    loadSessions(id);
   }, [id]);
+
+  async function toggleEnroll(s: TrainingSession) {
+    setBusyId(s.id);
+    setError(null);
+    try {
+      if (s.enrolled) await api.cancelSession(s.id);
+      else await api.enrollSession(s.id);
+      if (id) loadSessions(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Action failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function markComplete() {
     if (!id) return;
@@ -68,6 +93,43 @@ export function TrainingDetailPage() {
       <div className="card">
         <p className="muted">{training.duration_minutes} minutes</p>
         <p>{training.description || "No description."}</p>
+      </div>
+
+      <div className="card">
+        <div className="topbar" style={{ marginBottom: "0.5rem" }}>
+          <h3 style={{ margin: 0 }}>Upcoming sessions</h3>
+          {canManage && <Link to="/schedule">Schedule one →</Link>}
+        </div>
+        {sessions.length === 0 ? (
+          <p className="muted">No upcoming sessions for this training.</p>
+        ) : (
+          <ul className="schedule-list">
+            {sessions.map((s) => {
+              const full =
+                s.capacity !== null && s.enrolled_count >= s.capacity && !s.enrolled;
+              return (
+                <li key={s.id}>
+                  <span>
+                    {formatDay(s.starts_at)} · {formatTimeRange(s.starts_at, s.ends_at)}
+                    {s.location ? ` · ${s.location}` : ""}
+                    <span className="muted">
+                      {"  "}
+                      ({s.enrolled_count}
+                      {s.capacity !== null ? `/${s.capacity}` : ""} enrolled)
+                    </span>
+                  </span>
+                  <button
+                    className={s.enrolled ? "secondary" : ""}
+                    disabled={busyId === s.id || full}
+                    onClick={() => void toggleEnroll(s)}
+                  >
+                    {full ? "Full" : s.enrolled ? "Cancel" : "Enroll"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
       <div className="card">

@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { StatusBadge } from "../components/StatusBadge";
-import type { Dashboard } from "../types";
+import { formatDay, formatTimeRange } from "../format";
+import type { Dashboard, TrainingSession } from "../types";
 
 export function DashboardPage() {
   const { user } = useAuth();
   const [data, setData] = useState<Dashboard | null>(null);
+  const [schedule, setSchedule] = useState<TrainingSession[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -15,6 +18,10 @@ export function DashboardPage() {
       .dashboard(user.id)
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"));
+    api
+      .mySchedule()
+      .then(setSchedule)
+      .catch(() => undefined);
   }, [user]);
 
   if (error) return <div className="error">{error}</div>;
@@ -24,6 +31,27 @@ export function DashboardPage() {
     <>
       <div className="topbar">
         <h2>My dashboard</h2>
+      </div>
+
+      <div className="card">
+        <h3>My upcoming sessions</h3>
+        {schedule.length === 0 ? (
+          <p className="muted">
+            No sessions booked. Browse the <Link to="/schedule">schedule</Link> to enroll.
+          </p>
+        ) : (
+          <ul className="schedule-list">
+            {schedule.map((s) => (
+              <li key={s.id}>
+                <Link to={`/trainings/${s.training_id}`}>{s.training_title}</Link>
+                <span className="muted">
+                  {formatDay(s.starts_at)} · {formatTimeRange(s.starts_at, s.ends_at)}
+                  {s.location ? ` · ${s.location}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="card">

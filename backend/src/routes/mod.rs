@@ -2,6 +2,7 @@ pub mod auth;
 pub mod certifications;
 pub mod oidc;
 pub mod reports;
+pub mod sessions;
 pub mod trainings;
 pub mod users;
 
@@ -57,6 +58,17 @@ pub fn router(state: AppState) -> Router {
         .route("/api/users/{id}", axum::routing::delete(users::delete))
         .route("/api/users/{id}/dashboard", get(users::dashboard))
         .route("/api/reports/compliance", get(reports::compliance))
+        .route("/api/me/schedule", get(sessions::my_schedule))
+        .route("/api/sessions", get(sessions::list).post(sessions::create))
+        .route(
+            "/api/sessions/{id}",
+            get(sessions::get_one)
+                .put(sessions::update)
+                .delete(sessions::delete),
+        )
+        .route("/api/sessions/{id}/enroll", post(sessions::enroll))
+        .route("/api/sessions/{id}/cancel", post(sessions::cancel))
+        .route("/api/sessions/{id}/enrollments", get(sessions::enrollments))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

@@ -35,6 +35,11 @@ async fn run() -> Result<(), String> {
 
     let pool = connect_with_retry(&config.database_url).await?;
 
+    // Apply idempotent schema upgrades so existing database volumes pick up
+    // newly added tables without a manual wipe. (init.sql still seeds a fresh
+    // database from scratch.)
+    run_migrations(&pool).await?;
+
     // Optionally bring up SSO. Discovery failure is non-fatal: the app still
     // starts with password login, SSO simply stays disabled.
     let oidc = match config.oidc.clone() {
@@ -97,6 +102,49 @@ async fn connect_with_retry(database_url: &str) -> Result<sqlx::PgPool, String> 
             Err(e) => return Err(format!("could not connect to database: {e}")),
         }
     }
+}
+
+/// Idempotent, additive schema migrations applied on every startup. Safe to
+/// run repeatedly (everything uses IF NOT EXISTS / CREATE OR REPLACE).
+async fn run_migrations(pool: &sqlx::PgPool) -> Result<(), String> {
+    const MIGRATION: &str = r#"
+        CREATE TABLE IF NOT EXISTS training_sessions (
+            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            training_id UUID NOT NULL REFERENCES trainings(id) ON DELETE CASCADE,
+            starts_at   TIMESTAMPTZ NOT NULL,
+            ends_at     TIMESTAMPTZ NOT NULL,
+            location    TEXT NOT NULL DEFAULT '',
+            instructor  TEXT,
+            capacity    INTEGER CHECK (capacity IS NULL OR capacity > 0),
+            created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CHECK (ends_at > starts_at)
+        );
+
+        CREATE OR REPLACE TRIGGER trg_training_sessions_updated_at
+            BEFORE UPDATE ON training_sessions
+            FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+        CREATE TABLE IF NOT EXISTS session_enrollments (
+            session_id  UUID NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
+            user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            status      TEXT NOT NULL DEFAULT 'enrolled'
+                        CHECK (status IN ('enrolled', 'cancelled', 'attended')),
+            enrolled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (session_id, user_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sessions_training ON training_sessions(training_id);
+        CREATE INDEX IF NOT EXISTS idx_sessions_starts_at ON training_sessions(starts_at);
+        CREATE INDEX IF NOT EXISTS idx_enrollments_user ON session_enrollments(user_id);
+    "#;
+
+    sqlx::raw_sql(MIGRATION)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("migration failed: {e}"))?;
+    Ok(())
 }
 
 /// Background task that deletes expired session rows so the session store does

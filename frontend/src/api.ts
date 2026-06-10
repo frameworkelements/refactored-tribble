@@ -4,9 +4,20 @@ import type {
   ComplianceEntry,
   Dashboard,
   Role,
+  SessionEnrollee,
   Training,
+  TrainingSession,
   UserProfile,
 } from "./types";
+
+export interface SessionInput {
+  training_id: string;
+  starts_at: string;
+  ends_at: string;
+  location?: string;
+  instructor?: string;
+  capacity?: number | null;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -102,6 +113,26 @@ export const api = {
       document_url?: string;
     }
   ) => request<void>("POST", `/api/certifications/${id}/assign`, input),
+
+  // sessions (scheduling)
+  listSessions: (opts?: { trainingId?: string; upcoming?: boolean }) => {
+    const params = new URLSearchParams();
+    if (opts?.trainingId) params.set("training_id", opts.trainingId);
+    if (opts?.upcoming !== undefined) params.set("upcoming", String(opts.upcoming));
+    const qs = params.toString();
+    return request<TrainingSession[]>("GET", `/api/sessions${qs ? `?${qs}` : ""}`);
+  },
+  getSession: (id: string) => request<TrainingSession>("GET", `/api/sessions/${id}`),
+  createSession: (input: SessionInput) =>
+    request<TrainingSession>("POST", "/api/sessions", input),
+  updateSession: (id: string, input: SessionInput) =>
+    request<TrainingSession>("PUT", `/api/sessions/${id}`, input),
+  deleteSession: (id: string) => request<void>("DELETE", `/api/sessions/${id}`),
+  enrollSession: (id: string) => request<void>("POST", `/api/sessions/${id}/enroll`),
+  cancelSession: (id: string) => request<void>("POST", `/api/sessions/${id}/cancel`),
+  sessionEnrollments: (id: string) =>
+    request<SessionEnrollee[]>("GET", `/api/sessions/${id}/enrollments`),
+  mySchedule: () => request<TrainingSession[]>("GET", "/api/me/schedule"),
 
   // users & reports
   listUsers: () => request<UserProfile[]>("GET", "/api/users"),

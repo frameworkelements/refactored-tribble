@@ -6,6 +6,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { TrainingsPage } from "./pages/TrainingsPage";
 import { TrainingDetailPage } from "./pages/TrainingDetailPage";
 import { CertificationsPage } from "./pages/CertificationsPage";
+import { SchedulePage } from "./pages/SchedulePage";
 import { AdminPage } from "./pages/AdminPage";
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/trainings" element={<TrainingsPage />} />
         <Route path="/trainings/:id" element={<TrainingDetailPage />} />
+        <Route path="/schedule" element={<SchedulePage />} />
         <Route path="/certifications" element={<CertificationsPage />} />
         {user.role === "admin" && <Route path="/admin" element={<AdminPage />} />}
         <Route path="/login" element={<Navigate to="/" replace />} />
