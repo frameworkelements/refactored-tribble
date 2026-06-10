@@ -56,3 +56,23 @@ export interface ComplianceEntry {
   user: UserProfile;
   certifications: CertificationStatus[];
 }
+
+export interface TrainingSession {
+  id: string;
+  training_id: string;
+  training_title: string;
+  starts_at: string;
+  ends_at: string;
+  location: string;
+  instructor: string | null;
+  capacity: number | null;
+  enrolled_count: number;
+  enrolled: boolean;
+}
+
+export interface SessionEnrollee {
+  user_id: string;
+  email: string;
+  status: string;
+  enrolled_at: string;
+}

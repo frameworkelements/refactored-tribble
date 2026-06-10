@@ -155,3 +155,42 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_completions_user ON user_training_completions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_certs_user ON user_certifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_certs_expiry ON user_certifications(expiry_date);
+
+-- ---------------------------------------------------------------------------
+-- training_sessions — scheduled instances of a training (date/time, place,
+-- optional instructor and capacity). Deleting a training removes its sessions.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS training_sessions (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    training_id UUID NOT NULL REFERENCES trainings(id) ON DELETE CASCADE,
+    starts_at   TIMESTAMPTZ NOT NULL,
+    ends_at     TIMESTAMPTZ NOT NULL,
+    location    TEXT NOT NULL DEFAULT '',
+    instructor  TEXT,
+    -- NULL capacity means unlimited seats.
+    capacity    INTEGER CHECK (capacity IS NULL OR capacity > 0),
+    created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (ends_at > starts_at)
+);
+
+CREATE TRIGGER trg_training_sessions_updated_at
+    BEFORE UPDATE ON training_sessions
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- session_enrollments — who is signed up for a scheduled session.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS session_enrollments (
+    session_id  UUID NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status      TEXT NOT NULL DEFAULT 'enrolled'
+                CHECK (status IN ('enrolled', 'cancelled', 'attended')),
+    enrolled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (session_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_training ON training_sessions(training_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_starts_at ON training_sessions(starts_at);
+CREATE INDEX IF NOT EXISTS idx_enrollments_user ON session_enrollments(user_id);

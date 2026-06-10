@@ -84,3 +84,28 @@ pub struct ComplianceEntry {
     pub user: UserProfile,
     pub certifications: Vec<CertificationStatus>,
 }
+
+/// A scheduled training session, enriched with the training title, the current
+/// number of enrolled people, and whether the requesting user is enrolled.
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct SessionView {
+    pub id: Uuid,
+    pub training_id: Uuid,
+    pub training_title: String,
+    pub starts_at: DateTime<Utc>,
+    pub ends_at: DateTime<Utc>,
+    pub location: String,
+    pub instructor: Option<String>,
+    pub capacity: Option<i32>,
+    pub enrolled_count: i64,
+    pub enrolled: bool,
+}
+
+/// A single person's enrollment in a session (manager view).
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct SessionEnrollee {
+    pub user_id: Uuid,
+    pub email: String,
+    pub status: String,
+    pub enrolled_at: DateTime<Utc>,
+}

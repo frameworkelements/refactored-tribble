@@ -8,6 +8,17 @@ certifications.
 - **Frontend:** React + TypeScript (Vite), served by nginx
 - **Orchestration:** Docker Compose
 
+**Features:** trainings catalogue & completions, certifications with expiry
+tracking, a compliance report, user management, **scheduled training sessions
+with enrollment** (capacity limits, a day-grouped schedule view, and a personal
+"my upcoming sessions" list), password login and optional OIDC single sign-on —
+all in a light, bright UI.
+
+> **Schema upgrades:** new tables are applied idempotently on startup
+> (`run_migrations` in `backend/src/main.rs`), so pulling new features does not
+> require wiping an existing database volume. `db/init.sql` still provisions a
+> fresh database from scratch.
+
 ## Quick start
 
 ```bash
@@ -94,6 +105,12 @@ All routes require a valid session cookie except `GET /health`,
 | GET | `/api/users` | list users (admin/manager) |
 | GET | `/api/users/:id/dashboard` | completions + cert status (own, or any for admin/manager) |
 | GET | `/api/reports/compliance` | overdue/expiring certs (admin only) |
+| GET/POST | `/api/sessions` | list upcoming scheduled sessions / create one (admin/manager for POST) |
+| GET/PUT/DELETE | `/api/sessions/:id` | session detail / update / delete (admin/manager for PUT/DELETE) |
+| POST | `/api/sessions/:id/enroll` | enroll the current user (capacity- and time-checked) |
+| POST | `/api/sessions/:id/cancel` | cancel the current user's enrollment |
+| GET | `/api/sessions/:id/enrollments` | who is enrolled (admin/manager) |
+| GET | `/api/me/schedule` | the current user's upcoming enrolled sessions |
 
 ## Security notes
 
